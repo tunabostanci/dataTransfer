@@ -1,6 +1,7 @@
 package com.example.filetransfer
 
 import android.content.ContentResolver
+import android.content.Context
 import android.net.Uri
 import androidx.lifecycle.LiveData
 import androidx.lifecycle.MutableLiveData
@@ -13,11 +14,21 @@ import okhttp3.MediaType.Companion.toMediaType
 import okio.BufferedSink
 import okio.buffer
 import okio.source
+import org.json.JSONArray
+import java.io.File
 import java.io.InputStream
 
 class HomeViewModel : ViewModel() {
+    private val client = OkHttpClient()
 
-    // Upload progress için LiveData
+    private val _downloadProgress = MutableLiveData<Int>()
+    val downloadProgress: LiveData<Int> = _downloadProgress
+
+    private val _downloadStatus = MutableLiveData<String>()
+    val downloadStatus: LiveData<String> = _downloadStatus
+
+    private val _remoteFiles = MutableLiveData<List<String>>()
+    val remoteFiles: LiveData<List<String>> = _remoteFiles
     private val _uploadProgress = MutableLiveData<Int>()
     val uploadProgress: LiveData<Int> get() = _uploadProgress
 
@@ -93,6 +104,69 @@ class HomeViewModel : ViewModel() {
         } catch (e: Exception) {
             e.printStackTrace()
             _uploadStatus.postValue("Upload error: ${e.message}")
+        }
+    }
+    fun fetchRemoteFileList(serverBaseUrl: String = "http://10.0.2.2:5000") {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val request = Request.Builder().url("$serverBaseUrl/uploads").build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        _downloadStatus.postValue("Liste alınamadı: ${response.code}")
+                        return@use
+                    }
+                    val files = JSONArray(response.body!!.string())
+                    val list = List(files.length()) { i -> files.getString(i) }
+                    _remoteFiles.postValue(list)
+                }
+            } catch (e: Exception) {
+                _downloadStatus.postValue("Hata: ${e.message}")
+            }
+        }
+    }
+
+    fun downloadFile(context: Context, filename: String, serverBaseUrl: String = "http://10.0.2.2:5000") {
+        viewModelScope.launch(Dispatchers.IO) {
+            try {
+                val url = "$serverBaseUrl/uploads/${java.net.URLEncoder.encode(filename, "utf-8")}"
+                val request = Request.Builder().url(url).build()
+                client.newCall(request).execute().use { response ->
+                    if (!response.isSuccessful) {
+                        _downloadStatus.postValue("İndirme hatası: ${response.code}")
+                        return@use
+                    }
+
+                    // Downloads klasörüne kaydet
+                    val downloadsDir = android.os.Environment.getExternalStoragePublicDirectory(
+                        android.os.Environment.DIRECTORY_DOWNLOADS
+                    )
+                    if (!downloadsDir.exists()) downloadsDir.mkdirs()
+                    val file = File(downloadsDir, filename)
+
+                    val body = response.body!!
+                    val total = body.contentLength()
+                    var downloaded: Long = 0
+                    val buffer = ByteArray(8 * 1024)
+                    var read: Int
+
+                    body.byteStream().use { input ->
+                        file.outputStream().use { output ->
+                            while (input.read(buffer).also { read = it } != -1) {
+                                output.write(buffer, 0, read)
+                                downloaded += read
+                                if (total > 0) {
+                                    val progress = (downloaded * 100 / total).toInt()
+                                    _downloadProgress.postValue(progress)
+                                }
+                            }
+                        }
+                    }
+
+                    _downloadStatus.postValue("İndirildi: ${file.absolutePath}")
+                }
+            } catch (e: Exception) {
+                _downloadStatus.postValue("İndirme hatası: ${e.message}")
+            }
         }
     }
 }

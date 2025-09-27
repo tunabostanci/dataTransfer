@@ -1,5 +1,6 @@
 package com.example.filetransfer
 
+import android.app.AlertDialog
 import android.net.Uri
 import android.os.Bundle
 import android.view.LayoutInflater
@@ -31,8 +32,7 @@ class HomeFragment : Fragment() {
     }
 
     override fun onCreateView(
-        inflater: LayoutInflater, container: ViewGroup?,
-        savedInstanceState: Bundle?
+        inflater: LayoutInflater, container: ViewGroup?, savedInstanceState: Bundle?
     ): View {
         val view = inflater.inflate(R.layout.fragment_home, container, false)
 
@@ -60,8 +60,29 @@ class HomeFragment : Fragment() {
         }
 
         receiveBtn.setOnClickListener {
-            // Dosya indirme işlemi buraya
-            Toast.makeText(requireContext(), "Receive fonksiyonu henüz yok", Toast.LENGTH_SHORT).show()
+            viewModel.fetchRemoteFileList("http://10.0.2.2:5000")
+        }
+        viewModel.downloadProgress.observe(viewLifecycleOwner) { progress ->
+            progressBar.progress = progress
+            Log.d("DownloadProgress", "Progress: $progress%")
+        }
+
+// Download status
+        viewModel.downloadStatus.observe(viewLifecycleOwner) { status ->
+            Toast.makeText(requireContext(), status, Toast.LENGTH_SHORT).show()
+            Log.d("DownloadStatus", status)
+        }
+        viewModel.remoteFiles.observe(viewLifecycleOwner) { list ->
+            if (list.isEmpty()) {
+                Toast.makeText(requireContext(), "Sunucuda dosya yok", Toast.LENGTH_SHORT).show()
+                return@observe
+            }
+
+            AlertDialog.Builder(requireContext()).setTitle("İndirilecek dosya seç")
+                .setItems(list.toTypedArray()) { _, which ->
+                    val chosen = list[which]
+                    viewModel.downloadFile(requireContext(), chosen)
+                }.setNegativeButton("İptal", null).show()
         }
 
         return view
